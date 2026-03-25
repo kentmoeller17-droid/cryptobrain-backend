@@ -27,6 +27,10 @@ function getBotKey(userId, botId) {
   return `${userId}::${botId}`;
 }
 
+function getSessionKey(userId, botId) {
+  return `${userId}::${botId}`;
+}
+
 function ensureSeedBots(userId) {
   const existing = Array.from(botsStore.values()).filter((bot) => bot.user_id === userId);
   if (existing.length > 0) return existing;
@@ -82,10 +86,6 @@ function getUserBots(userId) {
   return Array.from(botsStore.values()).filter((bot) => bot.user_id === userId);
 }
 
-function getSessionKey(userId, botId) {
-  return `${userId}::${botId}`;
-}
-
 app.get("/", (_req, res) => {
   res.send("CryptoB.R.A.I.N backend läuft 🚀");
 });
@@ -95,6 +95,7 @@ app.get("/api/health", (_req, res) => {
     ok: true,
     service: "cryptobrain-backend",
     time: new Date().toISOString(),
+    hasGroqKey: Boolean(process.env.GROQ_API_KEY),
   });
 });
 
@@ -198,9 +199,18 @@ app.post("/api/sessions/:botId/messages", (req, res) => {
 
 app.post("/api/brain/groq", async (req, res) => {
   try {
+    console.log("HAS_GROQ_KEY", Boolean(process.env.GROQ_API_KEY));
+    console.log("BODY_PREVIEW", JSON.stringify(req.body)?.slice(0, 800));
+
     if (!process.env.GROQ_API_KEY) {
       return res.status(500).json({ error: "GROQ_API_KEY fehlt" });
     }
+
+    const upstreamBody = {
+      model: req.body?.model || "llama-3.3-70b-versatile",
+      messages: Array.isArray(req.body?.messages) ? req.body.messages : [],
+      temperature: typeof req.body?.temperature === "number" ? req.body.temperature : 0.15,
+    };
 
     const response = await fetch("https://api.groq.com/openai/v1/chat/completions", {
       method: "POST",
@@ -208,12 +218,24 @@ app.post("/api/brain/groq", async (req, res) => {
         "Content-Type": "application/json",
         Authorization: "Bearer " + process.env.GROQ_API_KEY,
       },
-      body: JSON.stringify(req.body),
+      body: JSON.stringify(upstreamBody),
     });
 
-    const data = await response.json().catch(() => ({}));
+    const rawText = await response.text();
+
+    console.log("GROQ_STATUS", response.status);
+    console.log("GROQ_RAW", rawText.slice(0, 2000));
+
+    let data;
+    try {
+      data = JSON.parse(rawText);
+    } catch {
+      data = { raw: rawText };
+    }
+
     return res.status(response.status).json(data);
   } catch (error) {
+    console.error("GROQ_PROXY_ERROR", error);
     return res.status(500).json({
       error: error?.message || "Groq Proxy failed",
     });
