@@ -12,6 +12,7 @@ app.use(
     credentials: false,
   })
 );
+
 app.use(express.json({ limit: "1mb" }));
 
 const PORT = process.env.PORT || 8787;
@@ -35,6 +36,8 @@ function ensureSeedBots(userId) {
   const existing = Array.from(botsStore.values()).filter((bot) => bot.user_id === userId);
   if (existing.length > 0) return existing;
 
+  const now = new Date().toISOString();
+
   const seeded = [
     {
       id: "doge-core-rotation",
@@ -51,8 +54,8 @@ function ensureSeedBots(userId) {
         blockBBuybackPct: 4,
         blockBMode: "defensiv",
       },
-      created_at: new Date().toISOString(),
-      updated_at: new Date().toISOString(),
+      created_at: now,
+      updated_at: now,
     },
     {
       id: "doge-block-ab",
@@ -69,8 +72,8 @@ function ensureSeedBots(userId) {
         blockBBuybackPct: 4.6,
         blockBMode: "aggressiv",
       },
-      created_at: new Date().toISOString(),
-      updated_at: new Date().toISOString(),
+      created_at: now,
+      updated_at: now,
     },
   ];
 
@@ -115,6 +118,8 @@ app.post("/api/bots", (req, res) => {
     });
   }
 
+  const now = new Date().toISOString();
+
   const bot = {
     id: body.id || `bot-${Date.now()}`,
     user_id: userId,
@@ -123,8 +128,8 @@ app.post("/api/bots", (req, res) => {
     timeframe: String(body.timeframe),
     status: String(body.status || "Draft"),
     config: typeof body.config === "object" && body.config ? body.config : {},
-    created_at: new Date().toISOString(),
-    updated_at: new Date().toISOString(),
+    created_at: now,
+    updated_at: now,
   };
 
   botsStore.set(getBotKey(userId, bot.id), bot);
