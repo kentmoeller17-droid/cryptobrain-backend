@@ -214,7 +214,7 @@ app.post("/api/brain/groq", async (req, res) => {
     const upstreamBody = {
       model: req.body?.model || "llama-3.3-70b-versatile",
       messages: Array.isArray(req.body?.messages) ? req.body.messages : [],
-      temperature: typeof req.body?.temperature === "number" ? req.body.temperature : 0.15,
+      temperature: typeof req.body?.temperature === "number" ? req.body.temperature : 0.1,
     };
 
     const response = await fetch("https://api.groq.com/openai/v1/chat/completions", {
