@@ -1,321 +1,129 @@
-import express from "express";
-import cors from "cors";
-import dotenv from "dotenv";
+const express = require("express");
+const cors = require("cors");
+const dotenv = require("dotenv");
+const path = require("path");
 
 dotenv.config();
 
+let OpenAI = null;
+try {
+  OpenAI = require("openai");
+} catch (_) {
+  OpenAI = null;
+}
+
 const app = express();
+const PORT = process.env.PORT || 3000;
 
-app.use(
-  cors({
-    origin: true,
-    credentials: false,
-  })
-);
+app.use(cors());
+app.use(express.json({ limit: "2mb" }));
+app.use(express.static(path.join(__dirname, "public")));
 
-app.use(express.json({ limit: "1mb" }));
+const ADMIN_USERNAME = process.env.ADMIN_USERNAME || "admin";
+const ADMIN_PASSWORD = process.env.ADMIN_PASSWORD || "changeme";
 
-const PORT = process.env.PORT || 8787;
+const HAS_OPENAI = !!process.env.OPENAI_API_KEY && !!OpenAI;
+const openai = HAS_OPENAI
+  ? new OpenAI({ apiKey: process.env.OPENAI_API_KEY })
+  : null;
 
-const botsStore = new Map();
-const messagesStore = new Map();
+const sessions = new Map();
 
-function getUserId(req) {
-  return req.header("x-user-id") || "guest@local";
+const bots = [
+  { id: "bot-1", name: "BTC Momentum", symbol: "BTC/USDT", strategy: "Momentum", riskLevel: "Medium", active: true },
+  { id: "bot-2", name: "ETH Swing", symbol: "ETH/USDT", strategy: "Swing", riskLevel: "Low", active: true },
+  { id: "bot-3", name: "SOL Fast", symbol: "SOL/USDT", strategy: "Scalp", riskLevel: "High", active: false }
+];
+
+const trades = [
+  { id: "t1", botId: "bot-1", pnl: 48.2 },
+  { id: "t2", botId: "bot-2", pnl: -12.7 },
+  { id: "t3", botId: "bot-1", pnl: 19.4 },
+  { id: "t4", botId: "bot-3", pnl: 31.6 }
+];
+
+function getSession(id) {
+  if (!sessions.has(id)) {
+    sessions.set(id, { messages: [] });
+  }
+  return sessions.get(id);
 }
 
-function getBotKey(userId, botId) {
-  return `${userId}::${botId}`;
+function limitHistory(messages, max = 6) {
+  return messages.slice(-max);
 }
 
-function getSessionKey(userId, botId) {
-  return `${userId}::${botId}`;
+function computeStats() {
+  const total = trades.reduce((s, t) => s + t.pnl, 0);
+  const wins = trades.filter(t => t.pnl > 0).length;
+  return {
+    pnl: total.toFixed(2),
+    winrate: ((wins / trades.length) * 100).toFixed(1)
+  };
 }
 
-function ensureSeedBots(userId) {
-  const existing = Array.from(botsStore.values()).filter((bot) => bot.user_id === userId);
-  if (existing.length > 0) return existing;
+function demoAnswer(msg) {
+  const q = msg.toLowerCase();
 
-  const now = new Date().toISOString();
+  if (q.includes("btc")) return "BTC aktuell leicht bullish. Trend beobachten.";
+  if (q.includes("eth")) return "ETH neutral. Kein klares Signal.";
+  if (q.includes("bot")) return "BTC Momentum ist aktuell der beste Bot.";
+  if (q.includes("pnl")) {
+    const s = computeStats();
+    return `PnL: ${s.pnl} USDT | Winrate: ${s.winrate}%`;
+  }
 
-  const seeded = [
-    {
-      id: "doge-core-rotation",
-      user_id: userId,
-      name: "DOGE Core Rotation",
-      status: "Live Sim",
-      pair: "DOGE/USDT",
-      timeframe: "15m",
-      config: {
-        coreRatio: 0.67,
-        blockASellRsi: 70,
-        blockABuybackPct: 2,
-        blockBSellRsi: 78,
-        blockBBuybackPct: 4,
-        blockBMode: "defensiv",
-      },
-      created_at: now,
-      updated_at: now,
-    },
-    {
-      id: "doge-block-ab",
-      user_id: userId,
-      name: "DOGE Block A/B",
-      status: "Replay+AI",
-      pair: "DOGE/USDT",
-      timeframe: "15m",
-      config: {
-        coreRatio: 0.67,
-        blockASellRsi: 68,
-        blockABuybackPct: 1.8,
-        blockBSellRsi: 80,
-        blockBBuybackPct: 4.6,
-        blockBMode: "aggressiv",
-      },
-      created_at: now,
-      updated_at: now,
-    },
+  return "CryptoB.R.A.I.N aktiv. Frag nach Bots, BTC, ETH oder Performance.";
+}
+
+async function askAI(session, message) {
+  if (!HAS_OPENAI) return demoAnswer(message);
+
+  const messages = [
+    { role: "system", content: "Du bist ein Trading AI Assistant. Kurz, präzise." },
+    ...limitHistory(session.messages),
+    { role: "user", content: message }
   ];
 
-  for (const bot of seeded) {
-    botsStore.set(getBotKey(userId, bot.id), bot);
-  }
+  try {
+    const completion = await openai.chat.completions.create({
+      model: "gpt-4o-mini",
+      messages
+    });
 
-  return seeded;
+    return completion.choices[0].message.content;
+  } catch (e) {
+    return "AI Fehler → fallback aktiv.";
+  }
 }
 
-function getUserBots(userId) {
-  ensureSeedBots(userId);
-  return Array.from(botsStore.values()).filter((bot) => bot.user_id === userId);
-}
+app.post("/api/chat", async (req, res) => {
+  const { message, sessionId = "default" } = req.body;
 
-app.get("/", (_req, res) => {
-  res.send("CryptoB.R.A.I.N backend läuft 🚀");
+  const session = getSession(sessionId);
+  session.messages.push({ role: "user", content: message });
+
+  const reply = await askAI(session, message);
+
+  session.messages.push({ role: "assistant", content: reply });
+
+  res.json({ reply });
 });
 
-app.get("/api/health", (_req, res) => {
-  res.json({
-    ok: true,
-    service: "cryptobrain-backend",
-    time: new Date().toISOString(),
-    hasGroqKey: Boolean(process.env.GROQ_API_KEY),
-  });
+app.get("/api/stats", (req, res) => {
+  res.json(computeStats());
 });
 
-app.get("/api/bots", (req, res) => {
-  const userId = getUserId(req);
-  const bots = getUserBots(userId);
-  res.json({ bots });
-});
+app.post("/api/login", (req, res) => {
+  const { username, password } = req.body;
 
-app.post("/api/bots", (req, res) => {
-  const userId = getUserId(req);
-  const body = req.body || {};
-
-  if (!body.name || !body.pair || !body.timeframe) {
-    return res.status(400).json({
-      error: "name, pair und timeframe sind erforderlich",
-    });
+  if (username === ADMIN_USERNAME && password === ADMIN_PASSWORD) {
+    return res.json({ success: true });
   }
 
-  const now = new Date().toISOString();
-
-  const bot = {
-    id: body.id || `bot-${Date.now()}`,
-    user_id: userId,
-    name: String(body.name),
-    pair: String(body.pair),
-    timeframe: String(body.timeframe),
-    status: String(body.status || "Draft"),
-    config: typeof body.config === "object" && body.config ? body.config : {},
-    created_at: now,
-    updated_at: now,
-  };
-
-  botsStore.set(getBotKey(userId, bot.id), bot);
-
-  res.status(201).json({ bot });
-});
-
-app.patch("/api/bots/:id", (req, res) => {
-  const userId = getUserId(req);
-  const botId = req.params.id;
-  const key = getBotKey(userId, botId);
-
-  if (!botsStore.has(key)) {
-    return res.status(404).json({ error: "Bot nicht gefunden" });
-  }
-
-  const existing = botsStore.get(key);
-  const body = req.body || {};
-
-  const updated = {
-    ...existing,
-    ...body,
-    id: existing.id,
-    user_id: existing.user_id,
-    updated_at: new Date().toISOString(),
-    config:
-      typeof body.config === "object" && body.config
-        ? { ...existing.config, ...body.config }
-        : existing.config,
-  };
-
-  botsStore.set(key, updated);
-
-  res.json({ bot: updated });
-});
-
-app.get("/api/sessions/:botId", (req, res) => {
-  const userId = getUserId(req);
-  const botId = req.params.botId;
-  const key = getSessionKey(userId, botId);
-  const messages = messagesStore.get(key) || [];
-  res.json({ messages });
-});
-
-app.post("/api/sessions/:botId/messages", (req, res) => {
-  const userId = getUserId(req);
-  const botId = req.params.botId;
-  const body = req.body || {};
-
-  if (!body.role || !body.text) {
-    return res.status(400).json({ error: "role und text sind erforderlich" });
-  }
-
-  const key = getSessionKey(userId, botId);
-  const existing = messagesStore.get(key) || [];
-
-  const message = {
-    id: `msg-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
-    user_id: userId,
-    bot_id: botId,
-    role: String(body.role),
-    text: String(body.text),
-    runtime_provider: body.runtime_provider || "unknown",
-    created_at: new Date().toISOString(),
-  };
-
-  existing.push(message);
-  messagesStore.set(key, existing);
-
-  res.status(201).json({ message });
-});
-
-app.post("/api/brain/groq", async (req, res) => {
-  try {
-    console.log("HAS_GROQ_KEY", Boolean(process.env.GROQ_API_KEY));
-    console.log("BODY_PREVIEW", JSON.stringify(req.body)?.slice(0, 800));
-
-    if (!process.env.GROQ_API_KEY) {
-      return res.status(500).json({ error: "GROQ_API_KEY fehlt" });
-    }
-
-    const upstreamBody = {
-      model: req.body?.model || "llama-3.3-70b-versatile",
-      messages: Array.isArray(req.body?.messages) ? req.body.messages : [],
-      temperature: typeof req.body?.temperature === "number" ? req.body.temperature : 0.1,
-    };
-
-    const response = await fetch("https://api.groq.com/openai/v1/chat/completions", {
-      method: "POST",
-      headers: {
-        "Content-Type": "application/json",
-        Authorization: "Bearer " + process.env.GROQ_API_KEY,
-      },
-      body: JSON.stringify(upstreamBody),
-    });
-
-    const rawText = await response.text();
-
-    console.log("GROQ_STATUS", response.status);
-    console.log("GROQ_RAW", rawText.slice(0, 2000));
-
-    let data;
-    try {
-      data = JSON.parse(rawText);
-    } catch {
-      data = { raw: rawText };
-    }
-
-    return res.status(response.status).json(data);
-  } catch (error) {
-    console.error("GROQ_PROXY_ERROR", error);
-    return res.status(500).json({
-      error: error?.message || "Groq Proxy failed",
-    });
-  }
-});
-
-app.post("/api/brain/ollama", async (req, res) => {
-  try {
-    const ollamaUrl =
-      process.env.OLLAMA_URL || "http://127.0.0.1:11434/v1/chat/completions";
-
-    const response = await fetch(ollamaUrl, {
-      method: "POST",
-      headers: {
-        "Content-Type": "application/json",
-        Authorization: "Bearer " + (process.env.OLLAMA_API_KEY || "ollama"),
-      },
-      body: JSON.stringify(req.body),
-    });
-
-    const data = await response.json().catch(() => ({}));
-    return res.status(response.status).json(data);
-  } catch (error) {
-    return res.status(500).json({
-      error: error?.message || "Ollama Proxy failed",
-    });
-  }
-});
-
-app.post("/api/brain/vllm", async (req, res) => {
-  try {
-    const vllmUrl =
-      process.env.VLLM_URL || "http://127.0.0.1:8000/v1/chat/completions";
-
-    const response = await fetch(vllmUrl, {
-      method: "POST",
-      headers: {
-        "Content-Type": "application/json",
-        Authorization: "Bearer " + (process.env.VLLM_API_KEY || "local"),
-      },
-      body: JSON.stringify(req.body),
-    });
-
-    const data = await response.json().catch(() => ({}));
-    return res.status(response.status).json(data);
-  } catch (error) {
-    return res.status(500).json({
-      error: error?.message || "vLLM Proxy failed",
-    });
-  }
-});
-
-app.post("/api/brain/llamacpp", async (req, res) => {
-  try {
-    const llamacppUrl =
-      process.env.LLAMACPP_URL || "http://127.0.0.1:8080/v1/chat/completions";
-
-    const response = await fetch(llamacppUrl, {
-      method: "POST",
-      headers: {
-        "Content-Type": "application/json",
-        Authorization: "Bearer " + (process.env.LLAMACPP_API_KEY || "local"),
-      },
-      body: JSON.stringify(req.body),
-    });
-
-    const data = await response.json().catch(() => ({}));
-    return res.status(response.status).json(data);
-  } catch (error) {
-    return res.status(500).json({
-      error: error?.message || "llama.cpp Proxy failed",
-    });
-  }
+  res.status(401).json({ success: false });
 });
 
 app.listen(PORT, () => {
-  console.log("Server läuft auf Port " + PORT);
+  console.log(`🚀 Server läuft auf Port ${PORT}`);
 });
