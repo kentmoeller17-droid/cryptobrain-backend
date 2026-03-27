@@ -35,6 +35,28 @@ function getSessionKey(userId, botId) {
 function ensureSeedBots(userId) {
   const existing = Array.from(botsStore.values()).filter((bot) => bot.user_id === userId);
   if (existing.length > 0) return existing;
+}
+
+function parseCsvText(text) {
+  const lines = text
+    .split(/\r?\n/)
+    .map((line) => line.trim())
+    .filter(Boolean);
+
+  if (lines.length < 2) return [];
+
+  const separator = lines[0].includes(";") ? ";" : ",";
+  const headers = lines[0].split(separator).map((h) => h.trim().toLowerCase());
+
+  return lines.slice(1).map((line) => {
+    const cols = line.split(separator);
+    const record = {};
+    headers.forEach((header, index) => {
+      record[header] = (cols[index] || "").trim();
+    });
+    return record;
+  });
+}
 
   const now = new Date().toISOString();
 
