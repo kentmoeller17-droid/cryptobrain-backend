@@ -1,0 +1,5 @@
+flask
+requests
+python-dotenv>=1.0.1
+playwright>=1.52.0
+streamlit>=1.44.0

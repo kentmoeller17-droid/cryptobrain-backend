@@ -1,0 +1,41 @@
+# Python
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+.venv/
+venv/
+
+# Local secrets
+.env
+
+# Runtime data
+*.db
+*.sqlite
+*.sqlite3
+backups/*
+!backups/.gitkeep
+cloud_store/*
+!cloud_store/.gitkeep
+!cloud_store/module_manifests/
+!cloud_store/module_manifests/.gitkeep
+!cloud_store/reference_snapshots/
+!cloud_store/reference_snapshots/.gitkeep
+workspace/generated/*
+!workspace/generated/.gitkeep
+workspace/generated/reviews/*
+!workspace/generated/reviews/.gitkeep
+workspace/projects/*
+!workspace/projects/.gitkeep
+workspace/module_manifests/*
+!workspace/module_manifests/.gitkeep
+workspace/admin/*
+!workspace/admin/.gitkeep
+workspace/core_backups_test/*
+!workspace/core_backups_test/.gitkeep
+workspace/mail_outbox/*
+!workspace/mail_outbox/.gitkeep
+
+# OS
+.DS_Store
+Thumbs.db
